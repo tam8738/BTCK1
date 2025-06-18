@@ -23,7 +23,7 @@ int humidity = 0;
 int soilMoisturePercentage = 0;
 int LDRPercentage = 0;
 int mucNuoc = 0; // ADC raw
-
+bool automode = true;
 /* Change to your screen resolution */
 static const uint16_t screenWidth  = 160;
 static const uint16_t screenHeight = 128;
@@ -268,8 +268,10 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   if (strcmp(myData.a, "ESP1") == 0) {
       // Giá trị độ ẩm đất
       Soil1 = myData.b;
+      sendDataMQTT();
   } else if (strcmp(myData.a, "ESP2") == 0) {
       Soil2 = myData.b;
+      sendDataMQTT();
   }
 }
 void readAHT10(){
@@ -279,7 +281,9 @@ void readAHT10(){
   humidity = humidity_event.relative_humidity;
   lv_label_set_text_fmt(ui_nhietDo_txt, "Nhiet do: %d °C", temperature);
   lv_label_set_text_fmt(ui_doAm_txt, "Do am: %d %%", humidity);
-  // Đã bỏ lv_bar_set_value(ui_nhietDo1, ...), ui_doAm1 vì không có trong ui.h
+  lv_bar_set_value(ui_nhietDoHT, temperature, LV_ANIM_OFF);  // cập nhật thanh bar nhiệt độ
+  lv_bar_set_value(ui_doAmHT, humidity, LV_ANIM_OFF);
+  sendDataMQTT();
 }
 
 void readLDR(){
@@ -287,9 +291,10 @@ void readLDR(){
   LDRPercentage = map(raw, 4095, 0, 0, 100);
   LDRPercentage = constrain(LDRPercentage, 0, 100);
   lv_label_set_text_fmt(ui_anhSang_txt, "Anh sang: %d %%", LDRPercentage);
-  // Đã bỏ lv_bar_set_value(ui_anhSang1, ...) vì không có trong ui.h
+  lv_bar_set_value(ui_anhSangHT, LDRPercentage, LV_ANIM_OFF); // cập nhật thanh bar ánh sáng
+  sendDataMQTT();
 }
-void checkWater(){
+bool checkWater(){
 
 }
 void updateDisplay(){
@@ -298,8 +303,105 @@ void updateDisplay(){
   lv_label_set_text_fmt(ui_anhSang_txt, "Anh sang: %d %%", LDRPercentage);
   lv_label_set_text_fmt(ui_doAmHT, "Do am dat: %d %%", soilMoisturePercentage);
 }
-void control(){
+void controlPump() {
+    static unsigned long buzzerStartTime = 0;
+    static bool buzzerOn = false;
+    bool water = checkWater();
 
+    // 1. Kiểm tra nước, xử lý còi cảnh báo
+    if (!water) {
+        digitalWrite(42, HIGH);                      // Tắt bơm
+        digitalWrite(47, HIGH);                      // Tắt van 1
+        digitalWrite(20, HIGH);                      // Tắt van 2
+        lv_obj_clear_state(ui_bom, LV_STATE_CHECKED); // Update giao diện
+        sendDataMQTT();
+
+        if (!buzzerOn) {
+            digitalWrite(PIN_BUZZER, HIGH);           // Bật còi
+            buzzerOn = true;
+            buzzerStartTime = millis();
+        } else {
+            if (millis() - buzzerStartTime >= 5000) { // Sau 5s thì tắt còi
+                digitalWrite(PIN_BUZZER, LOW);
+                buzzerOn = false;
+            }
+        }
+        return;
+    } else {
+        if (buzzerOn) {
+            digitalWrite(PIN_BUZZER, LOW);
+            buzzerOn = false;
+        }
+    }
+
+    // 2. Chế độ tự động
+    if (automode) {
+        if (Soil1 < setupSoilMoisteur || Soil2 < setupSoilMoisteur) {
+            digitalWrite(42, LOW);                   // Bật bơm
+            lv_obj_add_state(ui_bom, LV_STATE_CHECKED);
+
+            // Điều khiển van
+            if (Soil1 < setupSoilMoisteur && Soil2 >= setupSoilMoisteur) {
+                digitalWrite(47, LOW);               // Mở van 1
+                digitalWrite(20, HIGH);              // Tắt van 2
+            } else if (Soil2 < setupSoilMoisteur && Soil1 >= setupSoilMoisteur) {
+                digitalWrite(20, LOW);               // Mở van 2
+                digitalWrite(47, HIGH);              // Tắt van 1
+            } else if (Soil1 < setupSoilMoisteur && Soil2 < setupSoilMoisteur) {
+                digitalWrite(47, LOW);               // Mở van 1
+                digitalWrite(20, LOW);               // Mở van 2
+            }
+            sendDataMQTT();
+        } else {
+            // Đủ ẩm, tắt bơm và 2 van
+            digitalWrite(42, HIGH);                  // Tắt bơm
+            digitalWrite(47, HIGH);                  // Tắt van 1
+            digitalWrite(20, HIGH);                  // Tắt van 2
+            lv_obj_clear_state(ui_bom, LV_STATE_CHECKED);
+            sendDataMQTT();
+        }
+    } else {
+        // 3. Chế độ thủ công: bật bơm = bật cả 2 van, tắt bơm = tắt cả 2 van
+        if (pumpManualState) {
+            digitalWrite(42, LOW);                   // Bật bơm
+            digitalWrite(47, LOW);                   // Bật van 1
+            digitalWrite(20, LOW);                   // Bật van 2
+            lv_obj_add_state(ui_bom, LV_STATE_CHECKED);
+            sendDataMQTT();
+        } else {
+            digitalWrite(42, HIGH);                  // Tắt bơm
+            digitalWrite(47, HIGH);                  // Tắt van 1
+            digitalWrite(20, HIGH);                  // Tắt van 2
+            lv_obj_clear_state(ui_bom, LV_STATE_CHECKED);
+            sendDataMQTT();
+        }
+    }
+}
+void controlLight() {
+    if (automode) {
+        if (LDRPercentage < setupLightSensor) {
+            // Trời tối, bật đèn
+            digitalWrite(40, LOW); // Bật relay đèn
+            lv_obj_add_state(ui_den, LV_STATE_CHECKED);
+            sendDataMQTT();
+        } else {
+            // Đủ sáng, tắt đèn
+            digitalWrite(40, HIGH); // Tắt relay đèn
+            lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
+            sendDataMQTT();
+        }
+    } else {
+        // Thủ công: điều khiển đèn bằng nút hoặc lệnh ngoài (biến lightManualState)
+        if (lightManualState) {
+            digitalWrite(40, LOW); // Bật đèn
+            lv_obj_add_state(ui_den, LV_STATE_CHECKED);
+            sendDataMQTT();
+        } else {
+            digitalWrite(40, HIGH); // Tắt đèn
+            lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
+            sendDataMQTT();
+        }
+    }
 }
 void setup_wifi(){
   WiFi.mode(WIFI_STA);
