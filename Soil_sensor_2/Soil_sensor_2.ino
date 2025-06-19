@@ -1,8 +1,8 @@
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <WiFi.h>
-const int DryValue = 3130;   //you need to replace this value with Value_1 
-const int WaterValue = 1645;  //you need to replace this value with Value_2 
+const int DryValue = 3120;   //you need to replace this value with Value_1 
+const int WaterValue = 1300;  //you need to replace this value with Value_2 
 int soilMoistureValue = 0; 
 int soilMoisturePercent = 0;
 
@@ -15,6 +15,8 @@ typedef struct struct_message {
 struct_message myData;
 
 String success;
+int count = 0;
+
 esp_now_peer_info_t peerInfo;
 
 
@@ -46,7 +48,7 @@ void loop() {
   Serial.println(soilMoisturePercent);
   delay(100);
   // Send message via ESP-NOW
-  myData.a = 1;
+  myData.a = 2;
   myData.b = soilMoisturePercent;
   esp_err_t result = esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
    

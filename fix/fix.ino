@@ -37,7 +37,6 @@ bool valveState2 = false;
 bool pumpManualState = false;
 bool lightManualState = false;
 
-
 // Cấu hình thời gian thực
 const char *ntpServer1 = "pool.ntp.org";
 const char *ntpServer2 = "time.nist.gov";
@@ -100,6 +99,7 @@ void my_disp_flush( lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *colo
 
     lv_disp_flush_ready( disp );
 }
+
 // ----------- MQTT CONFIG -----------
 const char* mqttServer = "a7e103b17493474fb922fbc4a7a81412.s1.eu.hivemq.cloud";
 const int mqttPort = 8883;
@@ -111,6 +111,10 @@ const char* topicData   = "iot/data";
 const char* topicPump   = "iot/control/pump";
 const char* topicLight  = "iot/control/light";
 const char* topicMode   = "iot/control/mode";
+const char* topicValve1 = "iot/control/valve1";
+const char* topicValve2 = "iot/control/valve2";
+const char* topicThresholds = "iot/control/thresholds";
+
 static const char *root_ca PROGMEM = R"EOF(
 -----BEGIN CERTIFICATE-----
 MIIFazCCA1OgAwIBAgIRAIIQz7DSQONZRGPgu2OCiwAwDQYJKoZIhvcNAQELBQAw
@@ -144,6 +148,7 @@ mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
 emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )EOF";
+
 // --------- Button handlers ----------
 void hienThiBtn (char key) {
   switch(key) { 
@@ -161,18 +166,30 @@ void dieuKhienBtn (char key) {
     case '2': // Bật bơm
       lv_obj_add_state(ui_bom, LV_STATE_CHECKED);
       digitalWrite(PIN_RELAY_PUMP, HIGH); 
+      pumpManualState = true;
+      automode = false;
+      sendDataMQTT();
       break;
     case '3': // Tắt bơm
       lv_obj_clear_state(ui_bom, LV_STATE_CHECKED);
       digitalWrite(PIN_RELAY_PUMP, LOW); 
+      pumpManualState = false;
+      automode = false;
+      sendDataMQTT();
       break;
     case '4': // Bật đèn
       lv_obj_add_state(ui_den, LV_STATE_CHECKED);
       digitalWrite(PIN_RELAY_LIGHT, HIGH);
+      lightManualState = true;
+      automode = false;
+      sendDataMQTT();
       break;
     case '5': // Tắt đèn
       lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
       digitalWrite(PIN_RELAY_LIGHT, LOW);
+      lightManualState = false;
+      automode = false;
+      sendDataMQTT();
       break;
     case '1': // Chuyển sang màn hình setup
       _ui_screen_change(&ui_setUp, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, &ui_setUp_screen_init);
@@ -213,6 +230,7 @@ void setupBtn (char key) {
   lv_label_set_text_fmt(ui_anhSangSetup, "Anh sang: %d %%", setupLightSensor);
   lv_slider_set_value(ui_SetupAm, setupSoilMoisteur, LV_ANIM_OFF);
   lv_slider_set_value(ui_Setupsang, setupLightSensor, LV_ANIM_OFF);
+  sendDataMQTT();
 }
 
 // --------- Keypad to LVGL input ----------
@@ -343,6 +361,7 @@ void loop()
     
   delay(5);
 }
+
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&myData, incomingData, sizeof(myData));
   // Serial.print("From: ");
@@ -362,6 +381,7 @@ void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
     Serial.println(myData.b);
   }
 }
+
 void readAHT10(){
   sensors_event_t humidity_event, temp_event;
   aht.getEvent(&humidity_event, &temp_event);
@@ -373,6 +393,7 @@ void readAHT10(){
   lv_bar_set_value(ui_nhietDoHT, temperature, LV_ANIM_OFF);  // cập nhật thanh bar nhiệt độ
   sendDataMQTT();
 }
+
 void readLDR(){
   int raw = analogRead(4);
   LDRPercentage = map(raw, 4095, 0, 0, 100);
@@ -381,6 +402,7 @@ void readLDR(){
   lv_bar_set_value(ui_anhSangHT, LDRPercentage, LV_ANIM_OFF); // cập nhật thanh bar ánh sáng
   sendDataMQTT();
 }
+
 bool checkWater() {
     // Đọc trạng thái công tắc phao ở chân 5, LOW là có nước, HIGH là hết nước (chỉnh lại nếu cần)
     if (analogRead(5)<4080){
@@ -390,6 +412,7 @@ bool checkWater() {
       return true;
     }
 }
+
 void getLocalTime() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
@@ -405,6 +428,7 @@ void getLocalTime() {
     timeInitialized = true;
     //Serial.println("Time updated: " + currentTime);
 }
+
 void updateTime() {
     // Cập nhật thời gian mỗi giây
     if (millis() - lastTimeUpdate >= 1000) {
@@ -419,12 +443,14 @@ void updateTime() {
         lv_label_set_text(ui_time, "No Time");
     }
 }
+
 void updateDisplay(){
   lv_label_set_text_fmt(ui_nhietDo_txt, "Nhiet do: %d C", temperature);
   lv_label_set_text_fmt(ui_doAm_txt, "Do am: %d %%", humidity);
   lv_label_set_text_fmt(ui_anhSang_txt, "Anh sang: %d %%", LDRPercentage);
   updateTime(); // Cập nhật thời gian
 }
+
 void controlPump() {
   static unsigned long buzzerStartTime = 0;
   static bool buzzerOn = false;
@@ -512,6 +538,7 @@ void controlPump() {
     }
   }
 }
+
 void controlLight() {
   if (automode) {
     if (LDRPercentage < setupLightSensor) {
@@ -541,6 +568,7 @@ void controlLight() {
       }
   }
 }
+
 void setup_wifi(){
   Serial.println("Setting up WiFi...");
   
@@ -599,6 +627,7 @@ void setup_wifi(){
     isFirstTimeDevice = true;
   }
 }
+
 void reconnectMQTT(){
   while (!mqttClient.connected()) {
     String clientId = "ESP32Client-" + String(random(0xffff), HEX);
@@ -606,11 +635,15 @@ void reconnectMQTT(){
       mqttClient.subscribe(topicPump);
       mqttClient.subscribe(topicLight);
       mqttClient.subscribe(topicMode);
+      mqttClient.subscribe(topicValve1);
+      mqttClient.subscribe(topicValve2);
+      mqttClient.subscribe(topicThresholds);
     } else {
       delay(5000);
     }
   }
 }
+
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
   String message;
   for (int i = 0; i < length; i++) {
@@ -626,37 +659,85 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     if (message == "ON") {
       pumpManualState = true;
       automode = false;
+      digitalWrite(PIN_RELAY_PUMP, HIGH);
+      lv_obj_add_state(ui_bom, LV_STATE_CHECKED);
     } else if (message == "OFF") {
       pumpManualState = false;
       automode = false;
+      digitalWrite(PIN_RELAY_PUMP, LOW);
+      lv_obj_clear_state(ui_bom, LV_STATE_CHECKED);
     }
   } else if (String(topic) == topicLight) {
     if (message == "ON") {
       lightManualState = true;
       automode = false;
+      digitalWrite(PIN_RELAY_LIGHT, HIGH);
+      lv_obj_add_state(ui_den, LV_STATE_CHECKED);
     } else if (message == "OFF") {
       lightManualState = false;
       automode = false;
+      digitalWrite(PIN_RELAY_LIGHT, LOW);
+      lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
     }
   } else if (String(topic) == topicMode) {
-    if (message == "AUTO") {
+    if (message == "AUTO" || message == "1") {
       automode = true;
-    } else if (message == "MANUAL") {
+    } else if (message == "MANUAL" || message == "0") {
       automode = false;
     }
+  } else if (String(topic) == topicValve1) {
+    if (message == "ON") {
+      valveState1 = true;
+      digitalWrite(PIN_RELAY_VAN_1, LOW);
+    } else if (message == "OFF") {
+      valveState1 = false;
+      digitalWrite(PIN_RELAY_VAN_1, HIGH);
+    }
+  } else if (String(topic) == topicValve2) {
+    if (message == "ON") {
+      valveState2 = true;
+      digitalWrite(PIN_RELAY_VAN_2, LOW);
+    } else if (message == "OFF") {
+      valveState2 = false;
+      digitalWrite(PIN_RELAY_VAN_2, HIGH);
+    }
+  } else if (String(topic) == topicThresholds) {
+    StaticJsonDocument<200> doc;
+    DeserializationError error = deserializeJson(doc, message);
+    if (!error) {
+      if (doc.containsKey("setupSoilMoisteur")) {
+        setupSoilMoisteur = doc["setupSoilMoisteur"];
+        lv_label_set_text_fmt(ui_doAmSetUp, "Do am dat: %d %%", setupSoilMoisteur);
+        lv_slider_set_value(ui_SetupAm, setupSoilMoisteur, LV_ANIM_OFF);
+      }
+      if (doc.containsKey("setupLightSensor")) {
+        setupLightSensor = doc["setupLightSensor"];
+        lv_label_set_text_fmt(ui_anhSangSetup, "Anh sang: %d %%", setupLightSensor);
+        lv_slider_set_value(ui_Setupsang, setupLightSensor, LV_ANIM_OFF);
+      }
+    }
   }
+  sendDataMQTT();
 }
+
 void sendDataMQTT() {
   if (!mqttClient.connected()) reconnectMQTT();
-  StaticJsonDocument<256> doc;
+  StaticJsonDocument<512> doc;
   doc["temperature"] = temperature;
   doc["humidity"] = humidity;
-  doc["soil_moisture"] = soilMoisturePercentage;
+  doc["soil1"] = Soil1;
+  doc["soil2"] = Soil2;
   doc["light"] = LDRPercentage;
-  doc["water_level"] = (checkWater() <= true) ? "available" : "low";
+  doc["water_level"] = checkWater() ? "available" : "low";
   doc["pump_state"] = (digitalRead(PIN_RELAY_PUMP) == HIGH) ? "ON" : "OFF";
   doc["light_state"] = (digitalRead(PIN_RELAY_LIGHT) == HIGH) ? "ON" : "OFF";
-  char buffer[256];
+  doc["valve1_state"] = (digitalRead(PIN_RELAY_VAN_1) == LOW) ? "ON" : "OFF";
+  doc["valve2_state"] = (digitalRead(PIN_RELAY_VAN_2) == LOW) ? "ON" : "OFF";
+  doc["automode"] = automode;
+  doc["setupSoilMoisteur"] = setupSoilMoisteur;
+  doc["setupLightSensor"] = setupLightSensor;
+  
+  char buffer[512];
   serializeJson(doc, buffer);
   mqttClient.publish(topicData, buffer);
 }
