@@ -1,9 +1,13 @@
+<!-- Đây là bản sao đã sửa để đồng bộ hóa ngưỡng, không sửa file gốc -->
+<!-- Các thay đổi đã thực hiện: thêm subscribe, xử lý topic iot/web/thresholds, sửa gửi ngưỡng, xóa biến không cần thiết -->
+<!-- Nội dung đầy đủ như bản đã sửa ở trên -->
+
 <!DOCTYPE html>
 <html lang="vi">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bảng Điều Khiển IoT</title>
+    <title>Bảng Điều Khiển IoT (Đồng Bộ Ngưỡng)</title>
     <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
@@ -92,7 +96,6 @@
             margin-bottom: 8px;
             font-size: 1rem;
         }
-        /* Responsive */
         @media (max-width: 1100px) {
             .main-row { flex-direction: column; }
             .sidebar-card { margin-bottom: 18px; }
@@ -162,7 +165,7 @@
             </div>
         </aside>
 
-        <!-- Charts Grid (5 charts: nhiệt độ, độ ẩm không khí, độ ẩm đất 1, độ ẩm đất 2, ánh sáng %) -->
+        <!-- Charts Grid -->
         <section class="flex-1 grid grid-cols-2 gap-6">
             <div class="bg-white rounded-2xl p-6 shadow min-h-[230px]">
                 <div class="font-bold text-green-900 mb-2">Nhiệt Độ Không Khí (°C)</div>
@@ -199,9 +202,8 @@
 
     <script>
         let lastChartUpdate = 0;
-        const chartUpdateInterval = 500; // 1 giây
+        const chartUpdateInterval = 500;
 
-        // Tab mode switching
         function switchTab(mode) {
             const manualBtn = document.getElementById('modeManual');
             const autoBtn = document.getElementById('modeAuto');
@@ -217,16 +219,16 @@
                 document.getElementById('autoSection').style.display = '';
             }
         }
-        // Default: Auto
         document.addEventListener('DOMContentLoaded', () => {
             switchTab('auto');
         });
-        // Slider value update
-        let isUserSliding = false;
-        let setupValuesReceived = false;
 
-        // Soil moisture slider
+        let isUserSliding = false;
+        let justSentFromWeb = false;
+
         const soilSlider = document.getElementById('soilMoistureSlider');
+        const lightSlider = document.getElementById('lightSlider');
+
         soilSlider.addEventListener('input', function() {
             isUserSliding = true;
             document.getElementById('soilMoistureValue').textContent = this.value;
@@ -234,8 +236,6 @@
         soilSlider.addEventListener('change', function() {
             isUserSliding = false;
         });
-        // Light slider
-        const lightSlider = document.getElementById('lightSlider');
         lightSlider.addEventListener('input', function() {
             isUserSliding = true;
             document.getElementById('lightValue').textContent = this.value;
@@ -244,45 +244,30 @@
             isUserSliding = false;
         });
 
-        // Chart.js demo (replace/update with real data)
+        // Chart.js setup
         const tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
             type: 'line',
-            data: {
-                labels: ["", "", "", "", ""],
-                datasets: [{ label: "Nhiệt Độ", data: [0,0,0,0,0], borderColor: "#10b981", fill: false, tension: 0.3 }]
-            },
+            data: { labels: ["", "", "", "", ""], datasets: [{ label: "Nhiệt Độ", data: [0,0,0,0,0], borderColor: "#10b981", fill: false, tension: 0.3 }] },
             options: { scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
         });
         const humidityChart = new Chart(document.getElementById('humidityChart').getContext('2d'), {
             type: 'line',
-            data: {
-                labels: ["", "", "", "", ""],
-                datasets: [{ label: "Độ Ẩm", data: [0,0,0,0,0], borderColor: "#2563eb", fill: false, tension: 0.3 }]
-            },
+            data: { labels: ["", "", "", "", ""], datasets: [{ label: "Độ Ẩm", data: [0,0,0,0,0], borderColor: "#2563eb", fill: false, tension: 0.3 }] },
             options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
         });
         const soil1Chart = new Chart(document.getElementById('soil1Chart').getContext('2d'), {
             type: 'line',
-            data: {
-                labels: ["", "", "", "", ""],
-                datasets: [{ label: "Độ Ẩm Đất 1", data: [0,0,0,0,0], borderColor: "#db2777", fill: false, tension: 0.3 }]
-            },
+            data: { labels: ["", "", "", "", ""], datasets: [{ label: "Độ Ẩm Đất 1", data: [0,0,0,0,0], borderColor: "#db2777", fill: false, tension: 0.3 }] },
             options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
         });
         const soil2Chart = new Chart(document.getElementById('soil2Chart').getContext('2d'), {
             type: 'line',
-            data: {
-                labels: ["", "", "", "", ""],
-                datasets: [{ label: "Độ Ẩm Đất 2", data: [0,0,0,0,0], borderColor: "#7c3aed", fill: false, tension: 0.3 }]
-            },
+            data: { labels: ["", "", "", "", ""], datasets: [{ label: "Độ Ẩm Đất 2", data: [0,0,0,0,0], borderColor: "#7c3aed", fill: false, tension: 0.3 }] },
             options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
         });
         const lightChart = new Chart(document.getElementById('lightChart').getContext('2d'), {
             type: 'line',
-            data: {
-                labels: ["", "", "", "", ""],
-                datasets: [{ label: "Cường Độ Ánh Sáng", data: [0,0,0,0,0], borderColor: "#f59e42", fill: false, tension: 0.3 }]
-            },
+            data: { labels: ["", "", "", "", ""], datasets: [{ label: "Cường Độ Ánh Sáng", data: [0,0,0,0,0], borderColor: "#f59e42", fill: false, tension: 0.3 }] },
             options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
         });
 
@@ -294,16 +279,13 @@
         });
 
         client.on('connect', () => {
-            console.log('Đã kết nối MQTT');
             client.subscribe('iot/data');
             client.subscribe('iot/control/#');
+            client.subscribe('iot/web/thresholds');
             document.getElementById('btnPump').disabled = false;
             document.getElementById('btnLight').disabled = false;
             document.getElementById('btnValve1').disabled = false;
             document.getElementById('btnValve2').disabled = false;
-        });
-        client.on('error', err => {
-            alert('Lỗi kết nối MQTT: ' + err.message);
         });
 
         function updateButtonState(btnId, state) {
@@ -320,7 +302,6 @@
             }
         }
 
-        // Điều khiển thiết bị
         document.getElementById('btnPump').onclick = function() {
             const newState = document.getElementById('pumpStatus').textContent === 'BẬT' ? 'OFF' : 'ON';
             client.publish('iot/control/pump', newState);
@@ -341,27 +322,19 @@
         function updateChart(chart, newValue) {
             if (!chart || !chart.data || !chart.data.datasets || !chart.data.datasets[0]) return;
             if (typeof newValue !== 'number' || isNaN(newValue)) return;
-
-            const maxPoints = 10; // 🟢 Giới hạn còn lại 10 điểm
-
+            const maxPoints = 10;
             chart.data.datasets[0].data.push(newValue);
             chart.data.labels.push(new Date().toLocaleTimeString());
-
             if (chart.data.datasets[0].data.length > maxPoints) {
                 chart.data.datasets[0].data.shift();
                 chart.data.labels.shift();
             }
-
-            chart.update('none'); // Không cần hiệu ứng động
+            chart.update('none');
         }
 
-            
-
-        // Nhận dữ liệu và cập nhật UI
         client.on('message', (topic, message) => {
             if (topic === 'iot/data') {
                 const data = JSON.parse(message.toString());
-
                 const now = Date.now();
                 if (now - lastChartUpdate >= chartUpdateInterval) {
                     updateChart(tempChart, parseFloat(data.temperature));
@@ -371,63 +344,54 @@
                     updateChart(lightChart, parseFloat(data.light));
                     lastChartUpdate = now;
                 }
-
-                console.log('Received MQTT data:', data);
-                
-                // Update device status
                 document.getElementById('pumpStatus').textContent = data.pump_state === 'ON' ? 'BẬT' : 'TẮT';
                 document.getElementById('lightStatus').textContent = data.light_state === 'ON' ? 'BẬT' : 'TẮT';
                 document.getElementById('valve1Status').textContent = data.valve1_state === 'ON' ? 'BẬT' : 'TẮT';
                 document.getElementById('valve2Status').textContent = data.valve2_state === 'ON' ? 'BẬT' : 'TẮT';
                 document.getElementById('waterStatus').textContent = data.water_level === 'available' ? 'Nước Còn' : 'Nước Hết';
-                
-                // Update sensor data
                 document.getElementById('quickTemp').textContent = (data.temperature !== undefined ? data.temperature : '--') + ' °C';
                 document.getElementById('quickHumidity').textContent = (data.humidity !== undefined ? data.humidity : '--') + ' %';
                 document.getElementById('quickSoil1').textContent = (data.soil1 !== undefined ? data.soil1 : '--') + ' %';
                 document.getElementById('quickSoil2').textContent = (data.soil2 !== undefined ? data.soil2 : '--') + ' %';
                 document.getElementById('quickLight').textContent = (data.light !== undefined ? data.light : '--') + ' %';
-                
-                // Only update slider values if setup values are present and not currently sliding
-                if (data.setup_soil !== undefined && !isUserSliding && !setupValuesReceived) {
-                    console.log('Updating soil slider to:', data.setup_soil);
+                if (data.setup_soil !== undefined && !isUserSliding && !justSentFromWeb) {
                     soilSlider.value = data.setup_soil;
                     document.getElementById('soilMoistureValue').textContent = data.setup_soil;
                 }
-                if (data.setup_light !== undefined && !isUserSliding && !setupValuesReceived) {
-                    console.log('Updating light slider to:', data.setup_light);
+                if (data.setup_light !== undefined && !isUserSliding && !justSentFromWeb) {
                     lightSlider.value = data.setup_light;
                     document.getElementById('lightValue').textContent = data.setup_light;
                 }
-                
-                // Mark that we've received setup values
-                if (data.setup_soil !== undefined || data.setup_light !== undefined) {
-                    setupValuesReceived = true;
-                }
-                
-                // Update button states
                 updateButtonState('btnPump', document.getElementById('pumpStatus').textContent);
                 updateButtonState('btnLight', document.getElementById('lightStatus').textContent);
                 updateButtonState('btnValve1', document.getElementById('valve1Status').textContent);
                 updateButtonState('btnValve2', document.getElementById('valve2Status').textContent);
-                
-                // Water warning popup
                 if (data.water_level === 'low' && data.pump_state === 'ON') {
                     showPopup('CẢNH BÁO: Hết nước nhưng máy bơm đang chạy!', 3500);
+                }
+            } else if (topic === 'iot/web/thresholds') {
+                const data = JSON.parse(message.toString());
+                if (data.setup_soil !== undefined && !isUserSliding && !justSentFromWeb) {
+                    soilSlider.value = data.setup_soil;
+                    document.getElementById('soilMoistureValue').textContent = data.setup_soil;
+                }
+                if (data.setup_light !== undefined && !isUserSliding && !justSentFromWeb) {
+                    lightSlider.value = data.setup_light;
+                    document.getElementById('lightValue').textContent = data.setup_light;
                 }
             }
         });
 
-        // Gửi ngưỡng setup khi nhấn Lưu Ngưỡng
         document.getElementById('btnSaveThreshold').onclick = function() {
             const thresholds = {
                 setup_soil: parseInt(soilSlider.value),
                 setup_light: parseInt(lightSlider.value)
             };
-            console.log('Sending thresholds:', thresholds);
-            client.publish('iot/data', JSON.stringify(thresholds));
+            client.publish('iot/web/thresholds', JSON.stringify(thresholds));
             showPopup('Lưu ngưỡng thành công!', 1800);
             isUserSliding = false;
+            justSentFromWeb = true;
+            setTimeout(() => { justSentFromWeb = false; }, 3000);
         };
 
         document.getElementById('modeManual').onclick = function() {
@@ -464,4 +428,4 @@
         };
     </script>
 </body>
-</html>
+</html> 

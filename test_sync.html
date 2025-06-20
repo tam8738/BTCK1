@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Đồng Bộ Ngưỡng</title>
+    <script src="https://unpkg.com/mqtt@5.0.0/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 600px; margin: 0 auto; }
+        .slider-container { margin: 20px 0; }
+        .slider { width: 100%; margin: 10px 0; }
+        .value { font-weight: bold; color: #17664d; }
+        button { padding: 10px 20px; background: #10b981; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Test Đồng Bộ Ngưỡng IoT</h1>
+        
+        <div class="status" id="connectionStatus">Đang kết nối...</div>
+        
+        <div class="slider-container">
+            <label>Độ Ẩm Đất (%): <span id="soilValue" class="value">50</span></label>
+            <input type="range" min="0" max="100" value="50" class="slider" id="soilSlider">
+        </div>
+        
+        <div class="slider-container">
+            <label>Ánh Sáng (%): <span id="lightValue" class="value">30</span></label>
+            <input type="range" min="0" max="100" value="30" class="slider" id="lightSlider">
+        </div>
+        
+        <button onclick="sendThresholds()">Gửi Ngưỡng</button>
+        
+        <div class="status">
+            <h3>Log:</h3>
+            <div id="log"></div>
+        </div>
+    </div>
+
+    <script>
+        const client = mqtt.connect('wss://a7e103b17493474fb922fbc4a7a81412.s1.eu.hivemq.cloud:8884/mqtt', {
+            clientId: 'test_' + Math.random().toString(16).substr(2, 8),
+            username: 'Tuoi_cay',
+            password: 'Tuoi_cay1',
+            clean: true
+        });
+
+        const soilSlider = document.getElementById('soilSlider');
+        const lightSlider = document.getElementById('lightSlider');
+        const soilValue = document.getElementById('soilValue');
+        const lightValue = document.getElementById('lightValue');
+        const log = document.getElementById('log');
+        const status = document.getElementById('connectionStatus');
+
+        let isUserSliding = false;
+
+        // Cập nhật giá trị hiển thị
+        soilSlider.addEventListener('input', function() {
+            isUserSliding = true;
+            soilValue.textContent = this.value;
+        });
+        
+        soilSlider.addEventListener('change', function() {
+            isUserSliding = false;
+        });
+
+        lightSlider.addEventListener('input', function() {
+            isUserSliding = true;
+            lightValue.textContent = this.value;
+        });
+        
+        lightSlider.addEventListener('change', function() {
+            isUserSliding = false;
+        });
+
+        client.on('connect', () => {
+            status.textContent = 'Đã kết nối MQTT';
+            status.style.background = '#d4edda';
+            client.subscribe('iot/data');
+            client.subscribe('iot/web/thresholds');
+            addLog('Đã kết nối MQTT');
+        });
+
+        client.on('message', (topic, message) => {
+            const data = JSON.parse(message.toString());
+            addLog(`Nhận từ ${topic}: ${JSON.stringify(data)}`);
+            
+            if (topic === 'iot/data' && !isUserSliding) {
+                if (data.setup_soil !== undefined) {
+                    soilSlider.value = data.setup_soil;
+                    soilValue.textContent = data.setup_soil;
+                    addLog(`Cập nhật độ ẩm: ${data.setup_soil}%`);
+                }
+                if (data.setup_light !== undefined) {
+                    lightSlider.value = data.setup_light;
+                    lightValue.textContent = data.setup_light;
+                    addLog(`Cập nhật ánh sáng: ${data.setup_light}%`);
+                }
+            } else if (topic === 'iot/web/thresholds' && !isUserSliding) {
+                if (data.setup_soil !== undefined) {
+                    soilSlider.value = data.setup_soil;
+                    soilValue.textContent = data.setup_soil;
+                    addLog(`Cập nhật độ ẩm từ Arduino: ${data.setup_soil}%`);
+                }
+                if (data.setup_light !== undefined) {
+                    lightSlider.value = data.setup_light;
+                    lightValue.textContent = data.setup_light;
+                    addLog(`Cập nhật ánh sáng từ Arduino: ${data.setup_light}%`);
+                }
+            }
+        });
+
+        function sendThresholds() {
+            const thresholds = {
+                setup_soil: parseInt(soilSlider.value),
+                setup_light: parseInt(lightSlider.value)
+            };
+            client.publish('iot/web/thresholds', JSON.stringify(thresholds));
+            addLog(`Gửi ngưỡng: ${JSON.stringify(thresholds)}`);
+        }
+
+        function addLog(message) {
+            const time = new Date().toLocaleTimeString();
+            log.innerHTML += `<div>[${time}] ${message}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+    </script>
+</body>
+</html> 

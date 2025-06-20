@@ -79,6 +79,17 @@ int currentScreen = 0;
 uint8_t setupSoilMoisteur = 50;
 uint8_t setupLightSensor = 30;
 
+// Thêm biến toàn cục ở đầu file
+uint8_t lastSentSoilMoisteur = 50;
+uint8_t lastSentLightSensor = 30;
+unsigned long lastChangeTime = 0;
+bool thresholdChanged = false;
+
+void hienThiBtn (char key);
+void dieuKhienBtn (char key);
+void setupBtn (char key);
+void sendThresholdsMQTT();
+
 #if LV_USE_LOG != 0
 void my_print(const char * buf)
 {
@@ -150,11 +161,6 @@ emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 )EOF";
 
 // --------- Button handlers ----------
-void hienThiBtn (char key);
-void dieuKhienBtn (char key);
-void setupBtn (char key);
-void sendThresholdsMQTT();
-
 void hienThiBtn (char key) {
   switch(key) { 
     case '1': // Chuyển sang màn hình điều khiển
@@ -206,22 +212,27 @@ void dieuKhienBtn (char key) {
 }
 
 void setupBtn (char key) {
+  bool changed = false;
   switch(key) { 
     case '2': // Tăng độ ẩm
       setupSoilMoisteur++;
       setupSoilMoisteur = constrain(setupSoilMoisteur, 0, 100);
+      changed = true;
       break;
     case '3': // Giảm độ ẩm
       setupSoilMoisteur--;
       setupSoilMoisteur = constrain(setupSoilMoisteur, 0, 100);
+      changed = true;
       break;
     case '4': // Tăng ánh sáng
       setupLightSensor++;
       setupLightSensor = constrain(setupLightSensor, 0, 100);
+      changed = true;
       break;
     case '5': // Giảm ánh sáng
       setupLightSensor--;
       setupLightSensor = constrain(setupLightSensor, 0, 100);
+      changed = true;
       break;
     case '1': // Quay lại màn hình hiển thị
       _ui_screen_change(&ui_hienthi, LV_SCR_LOAD_ANIM_MOVE_LEFT, 200, 0, &ui_hienthi_screen_init);
@@ -235,9 +246,11 @@ void setupBtn (char key) {
   lv_label_set_text_fmt(ui_anhSangSetup, "Anh sang: %d %%", setupLightSensor);
   lv_slider_set_value(ui_SetupAm, setupSoilMoisteur, LV_ANIM_OFF);
   lv_slider_set_value(ui_Setupsang, setupLightSensor, LV_ANIM_OFF);
-  
-  // Gửi ngưỡng ngay khi thay đổi bằng nút ấn
-  sendThresholdsMQTT();
+
+  if (changed) {
+    lastChangeTime = millis();
+    thresholdChanged = true;
+  }
 }
 
 // --------- Keypad to LVGL input ----------
@@ -366,26 +379,26 @@ void loop()
     lastMQTTProcess = millis();
   }
     
+  // Debounce gửi ngưỡng sau 3s không nhấn nút
+  if (thresholdChanged && (millis() - lastChangeTime > 3000)) {
+    if (setupSoilMoisteur != lastSentSoilMoisteur || setupLightSensor != lastSentLightSensor) {
+      sendThresholdsMQTT();
+      lastSentSoilMoisteur = setupSoilMoisteur;
+      lastSentLightSensor = setupLightSensor;
+    }
+    thresholdChanged = false;
+  }
+    
   delay(5);
 }
 
 void OnDataRecv(const uint8_t * mac, const uint8_t *incomingData, int len) {
   memcpy(&myData, incomingData, sizeof(myData));
-  // Serial.print("From: ");
-  // Serial.println(myData.a);
-  // Serial.print("Value: ");
-  // Serial.println(myData.b);
-  // Serial.println();
-
   if (myData.a == 1){
-    Serial.print(" soil 1 : ");
     Soil1 = myData.b;
-    Serial.println(myData.b);
   }
   if (myData.a == 2){
-    Serial.print(" soil 2 : ");
     Soil2 = myData.b;
-    Serial.println(myData.b);
   }
 }
 
@@ -411,7 +424,6 @@ void readLDR(){
 }
 
 bool checkWater() {
-    // Đọc trạng thái công tắc phao ở chân 5, LOW là có nước, HIGH là hết nước (chỉnh lại nếu cần)
     if (analogRead(5)<4080){
       return false;
     }
@@ -423,27 +435,19 @@ bool checkWater() {
 void getLocalTime() {
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
-        //Serial.println("Failed to obtain time");
         return;
     }
-    
-    // Format thời gian HH:MM
     char timeStr[6];
     sprintf(timeStr, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
     currentTime = String(timeStr);
-    
     timeInitialized = true;
-    //Serial.println("Time updated: " + currentTime);
 }
 
 void updateTime() {
-    // Cập nhật thời gian mỗi giây
     if (millis() - lastTimeUpdate >= 1000) {
         getLocalTime();
         lastTimeUpdate = millis();
     }
-    
-    // Hiển thị thời gian lên màn hình
     if (timeInitialized) {
         lv_label_set_text(ui_time, currentTime.c_str());
     } else {
@@ -455,81 +459,61 @@ void updateDisplay(){
   lv_label_set_text_fmt(ui_nhietDo_txt, "Nhiet do: %d C", temperature);
   lv_label_set_text_fmt(ui_doAm_txt, "Do am: %d %%", humidity);
   lv_label_set_text_fmt(ui_anhSang_txt, "Anh sang: %d %%", LDRPercentage);
-  updateTime(); // Cập nhật thời gian
+  updateTime();
 }
 
 void controlPump() {
   static unsigned long buzzerStartTime = 0;
   static bool buzzerOn = false;
   bool water = checkWater();
-  //Kiểm tra nước, nếu hết nước bật còi cảnh báo
   if (water == false) {
-    Serial.println("no water!");
-    digitalWrite(PIN_RELAY_PUMP, LOW);                      // Tắt bơm
-    digitalWrite(PIN_RELAY_VAN_1, HIGH);                      // Tắt van 1
-    digitalWrite(PIN_RELAY_VAN_2, HIGH);                      // Tắt van 2
-    lv_obj_clear_state(ui_bom, LV_STATE_CHECKED); // Update giao diện
+    digitalWrite(PIN_RELAY_PUMP, LOW);
+    digitalWrite(PIN_RELAY_VAN_1, HIGH);
+    digitalWrite(PIN_RELAY_VAN_2, HIGH);
+    lv_obj_clear_state(ui_bom, LV_STATE_CHECKED);
     lv_label_set_text(ui_batbom, "het nuoc");
     sendDataMQTT();
     if (buzzerOn == false) {
-      //digitalWrite(PIN_BUZZER, HIGH);           // Bật còi
       tone(PIN_BUZZER, 2000);
       buzzerOn = true;
       buzzerStartTime = millis();
     }
   }
-  //nếu còn nước thì bơm và bật van nước
   else {
-    //Serial.println("ready to pump!");
     lv_label_set_text(ui_batbom, "bat bom");
-    // check còi => turn off
     if (buzzerOn == true) {
       tone(PIN_BUZZER, 0);
       buzzerOn = false;
     }
-    // Chế độ tự động
     if (automode) {
-      //Serial.println("automode: on");
-      // bật van nước
-      Serial.print("SOIL1:");
-      Serial.println(Soil1);
-      Serial.print("SOIL2:");
-      Serial.println(Soil2);
       if (Soil1 < setupSoilMoisteur || Soil2 < setupSoilMoisteur) {
-        digitalWrite(PIN_RELAY_PUMP, HIGH);                   // Bật bơm
+        digitalWrite(PIN_RELAY_PUMP, HIGH);
         lv_obj_add_state(ui_bom, LV_STATE_CHECKED);
         if (Soil1 < setupSoilMoisteur){
-          //Serial.println("bật van 1");
           digitalWrite(PIN_RELAY_VAN_1, LOW);
         }
         if (Soil2 < setupSoilMoisteur){
-          //Serial.println("bật van 2");
           digitalWrite(PIN_RELAY_VAN_2, LOW);
         }
         if (Soil1 > setupSoilMoisteur){
-          //Serial.println("tắt van 1");
           digitalWrite(PIN_RELAY_VAN_1, HIGH);
         }
         if (Soil2 > setupSoilMoisteur){
-          //Serial.println("tắt van 2");
           digitalWrite(PIN_RELAY_VAN_2, HIGH);
         }
         sendDataMQTT();
       }
       else{
-        Serial.println("all off");
         digitalWrite(PIN_RELAY_PUMP, LOW);
         digitalWrite(PIN_RELAY_VAN_1, HIGH);
         digitalWrite(PIN_RELAY_VAN_2, HIGH);
         sendDataMQTT();
       }
     }
-    // chế độ thủ công
     else {
-      //Serial.println("automode: off");
       if (pumpManualState) {
         if(valveState1){
-          digitalWrite(PIN_RELAY_VAN_1, LOW);                   // Bật van 1
+          digitalWrite(PIN_RELAY_VAN_1, LOW);
         }
         else{
           digitalWrite(PIN_RELAY_VAN_1, HIGH);
@@ -549,27 +533,24 @@ void controlPump() {
 void controlLight() {
   if (automode) {
     if (LDRPercentage < setupLightSensor) {
-      // Trời tối, bật đèn
-      digitalWrite(PIN_RELAY_LIGHT, HIGH); // Bật relay đèn
+      digitalWrite(PIN_RELAY_LIGHT, HIGH);
       lv_obj_add_state(ui_den, LV_STATE_CHECKED);
       sendDataMQTT();
     } 
     else {
-      // Đủ sáng, tắt đèn
-      digitalWrite(PIN_RELAY_LIGHT, LOW); // Tắt relay đèn
+      digitalWrite(PIN_RELAY_LIGHT, LOW);
       lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
       sendDataMQTT();
     }
   }
   else {
-    // Thủ công: điều khiển đèn bằng nút hoặc lệnh ngoài (biến lightManualState)
     if (lightManualState) {
-      digitalWrite(PIN_RELAY_LIGHT, HIGH); // Bật đèn
+      digitalWrite(PIN_RELAY_LIGHT, HIGH);
       lv_obj_add_state(ui_den, LV_STATE_CHECKED);
       sendDataMQTT();
     }
     else {
-      digitalWrite(PIN_RELAY_LIGHT, LOW); // Tắt đèn
+      digitalWrite(PIN_RELAY_LIGHT, LOW);
       lv_obj_clear_state(ui_den, LV_STATE_CHECKED);
       sendDataMQTT();
       }
@@ -582,7 +563,6 @@ void setup_wifi(){
   if (isFirstTimeDevice == true){
     Serial.println("Starting SmartConfig...");
     WiFi.beginSmartConfig();
-    // Chờ SmartConfig với timeout 60 giây
     int timeout = 0;
     while (!WiFi.smartConfigDone() && timeout < 120) { 
       delay(500); 
@@ -596,7 +576,6 @@ void setup_wifi(){
       Serial.println(WiFi.SSID());
       Serial.print("Password: ");
       Serial.println(WiFi.psk());
-      // write SSID and password to eeprom
       EEPROM.writeString(0, WiFi.SSID());
       EEPROM.writeString(1, WiFi.psk());
     } else {
@@ -613,7 +592,6 @@ void setup_wifi(){
     Serial.println(password);
     WiFi.begin(ssid, password);
   }
-  // Chờ kết nối WiFi
   Serial.println("Connecting to WiFi...");
   int timeout = 0;
   while (WiFi.status() != WL_CONNECTED && timeout < 60) { 
@@ -626,8 +604,6 @@ void setup_wifi(){
     Serial.println("\nWiFi connected!");
     Serial.print("IP address: ");
     Serial.println(WiFi.localIP());
-    
-    // Lấy thời gian sau khi kết nối WiFi
     getLocalTime();
   } else {
     Serial.println("\nWiFi connection failed!");
@@ -656,11 +632,6 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
   for (int i = 0; i < length; i++) {
     message += (char)payload[i];
   }
-  
-  Serial.print("Message arrived [");
-  Serial.print(topic);
-  Serial.print("] ");
-  Serial.println(message);
   
   if (String(topic) == topicPump) {
     if (message == "ON") {
@@ -717,13 +688,11 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
         setupSoilMoisteur = doc["setup_soil"];
         lv_label_set_text_fmt(ui_doAmSetUp, "Do am dat: %d %%", setupSoilMoisteur);
         lv_slider_set_value(ui_SetupAm, setupSoilMoisteur, LV_ANIM_OFF);
-        Serial.println("Updated soil threshold from web: " + String(setupSoilMoisteur));
       }
       if (doc.containsKey("setup_light")) {
         setupLightSensor = doc["setup_light"];
         lv_label_set_text_fmt(ui_anhSangSetup, "Anh sang: %d %%", setupLightSensor);
         lv_slider_set_value(ui_Setupsang, setupLightSensor, LV_ANIM_OFF);
-        Serial.println("Updated light threshold from web: " + String(setupLightSensor));
       }
     }
   }
@@ -762,5 +731,4 @@ void sendThresholdsMQTT() {
   char buffer[200];
   serializeJson(doc, buffer);
   mqttClient.publish(topicWebThresholds, buffer);
-  Serial.println("Sent thresholds: " + String(buffer));
-}
+} 
