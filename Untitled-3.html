@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bảng Điều Khiển IoT</title>
+    <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+    <script src="https://unpkg.com/mqtt@5.0.0/dist/mqtt.min.js"></script>
+    <style>
+        body { font-family: 'Roboto', sans-serif; background: #f7fafc; }
+        .sidebar-card {
+            background: #fff;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+            padding: 24px 24px 16px 24px;
+        }
+        .panel-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: #17664d;
+        }
+        .panel-section { margin-bottom: 20px; }
+        .panel-section:last-child { margin-bottom: 0; }
+        .panel-section-title {
+            font-weight: 600;
+            color: #17664d;
+            margin-bottom: 8px;
+        }
+        .panel-label { color: #17664d; }
+        .collapse-arrow {
+            float: right;
+            font-size: 1.1em;
+            color: #17664d;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .collapse-open .collapse-arrow { transform: rotate(90deg); }
+        .iot-btn {
+            width: 100%;
+            padding: 10px 0;
+            border-radius: 8px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            font-size: 1rem;
+            transition: background 0.2s;
+        }
+        .iot-btn:last-child { margin-bottom: 0; }
+        .iot-btn:disabled {
+            background: #d1d5db !important;
+            color: #fff !important;
+            cursor: not-allowed;
+        }
+        .tab-btn {
+            min-width: 90px;
+            padding: 6px 20px;
+            border-radius: 8px 8px 0 0;
+            font-weight: 500;
+            font-size: 1rem;
+            margin-left: 8px;
+            margin-right: 0;
+            transition: background 0.2s;
+        }
+        .tab-btn.active {
+            background: #6ee7b7;
+            color: #17664d;
+        }
+        .tab-btn.inactive {
+            background: #e5e7eb;
+            color: #17664d;
+        }
+        .panel-status span.value { font-weight: 700; color: #17664d; }
+        .panel-status .value.green { color: #15803d; }
+        .panel-status .value.red { color: #dc2626; }
+        .slider-value {
+            font-weight: 600;
+            margin-left: 10px;
+            color: #17664d;
+        }
+        .slider-label {
+            font-weight: 500;
+            color: #17664d;
+        }
+        .iot-range {
+            width: 100%;
+            accent-color: #38b2ac;
+        }
+        .more-sensor-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 1rem;
+        }
+        /* Responsive */
+        @media (max-width: 1100px) {
+            .main-row { flex-direction: column; }
+            .sidebar-card { margin-bottom: 18px; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between">
+    <!-- Header -->
+    <header class="w-full bg-white border-b border-gray-200 py-6 px-2">
+        <div class="max-w-6xl mx-auto flex items-center justify-between">
+            <h1 class="text-3xl font-bold text-green-900">Bảng Điều Khiển IoT</h1>
+            <div>
+                <button id="modeManual" class="tab-btn inactive" onclick="switchTab('manual')">Thủ Công</button>
+                <button id="modeAuto" class="tab-btn active" onclick="switchTab('auto')">Tự Động</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 w-full max-w-6xl mx-auto flex main-row gap-6 mt-4 mb-2 px-2">
+        <!-- Sidebar Left -->
+        <aside class="sidebar-card flex-shrink-0 w-full max-w-xs">
+            <!-- Điều Khiển -->
+            <div class="panel-section">
+                <div class="panel-title mb-2">Điều Khiển</div>
+                <div class="panel-status mb-2">
+                    <div class="panel-label">Trạng Thái Thiết Bị</div>
+                    <div class="panel-label">Máy Bơm: <span id="pumpStatus" class="value red">TẮT</span></div>
+                    <div class="panel-label">Đèn: <span id="lightStatus" class="value red">TẮT</span></div>
+                    <div class="panel-label">Van 1: <span id="valve1Status" class="value red">TẮT</span></div>
+                    <div class="panel-label">Van 2: <span id="valve2Status" class="value red">TẮT</span></div>
+                    <div class="panel-label">Mực Nước: <span id="waterStatus" class="value green">Nước Còn</span></div>
+                </div>
+            </div>
+            <!-- Điều Khiển Thủ Công -->
+            <div class="panel-section collapse-open" id="manualSection">
+                <div class="panel-section-title flex items-center justify-between">
+                    Điều Khiển Thủ Công
+                    <span class="collapse-arrow">&#8250;</span>
+                </div>
+                <button class="iot-btn bg-gray-300 text-white" id="btnPump" disabled>Bật Máy Bơm</button>
+                <button class="iot-btn bg-gray-300 text-white" id="btnLight" disabled>Bật Đèn</button>
+                <button class="iot-btn bg-gray-200 text-gray-700" id="btnValve1" disabled>Bật Van 1</button>
+                <button class="iot-btn bg-gray-200 text-gray-700" id="btnValve2" disabled>Bật Van 2</button>
+            </div>
+            <!-- Điều Khiển Tự Động -->
+            <div class="panel-section collapse-open" id="autoSection">
+                <div class="panel-section-title flex items-center justify-between">
+                    Điều Khiển Tự Động
+                    <span class="collapse-arrow">&#8250;</span>
+                </div>
+                <div class="slider-label mb-1">Độ Ẩm Đất (%): <span id="soilMoistureValue" class="slider-value">46</span></div>
+                <input type="range" min="0" max="100" value="46" class="iot-range mb-3" id="soilMoistureSlider">
+                <div class="slider-label mb-1">Cường Độ Ánh Sáng (%): <span id="lightValue" class="slider-value">47</span></div>
+                <input type="range" min="0" max="100" value="47" class="iot-range mb-3" id="lightSlider">
+
+                <button class="iot-btn bg-teal-400 text-white font-bold mt-2" id="btnSaveThreshold">Lưu Ngưỡng</button>
+            </div>
+            <!-- Dữ liệu cảm biến nhanh -->
+            <div class="panel-section">
+                <div class="panel-section-title mb-2">Dữ Liệu Nhanh</div>
+                <div class="more-sensor-row"><span>Nhiệt độ:</span> <span id="quickTemp">-- °C</span></div>
+                <div class="more-sensor-row"><span>Độ ẩm không khí:</span> <span id="quickHumidity">-- %</span></div>
+                <div class="more-sensor-row"><span>Độ ẩm đất 1:</span> <span id="quickSoil1">-- %</span></div>
+                <div class="more-sensor-row"><span>Độ ẩm đất 2:</span> <span id="quickSoil2">-- %</span></div>
+                <div class="more-sensor-row"><span>Cường độ ánh sáng:</span> <span id="quickLight">-- %</span></div>
+            </div>
+        </aside>
+
+        <!-- Charts Grid (5 charts: nhiệt độ, độ ẩm không khí, độ ẩm đất 1, độ ẩm đất 2, ánh sáng %) -->
+        <section class="flex-1 grid grid-cols-2 gap-6">
+            <div class="bg-white rounded-2xl p-6 shadow min-h-[230px]">
+                <div class="font-bold text-green-900 mb-2">Nhiệt Độ Không Khí (°C)</div>
+                <canvas id="tempChart"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow min-h-[230px]">
+                <div class="font-bold text-green-900 mb-2">Độ Ẩm Không Khí (%)</div>
+                <canvas id="humidityChart"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow min-h-[230px]">
+                <div class="font-bold text-green-900 mb-2">Độ Ẩm Đất 1 (%)</div>
+                <canvas id="soil1Chart"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow min-h-[230px]">
+                <div class="font-bold text-green-900 mb-2">Độ Ẩm Đất 2 (%)</div>
+                <canvas id="soil2Chart"></canvas>
+            </div>
+            <div class="bg-white rounded-2xl p-6 shadow min-h-[230px] col-span-2">
+                <div class="font-bold text-green-900 mb-2">Cường Độ Ánh Sáng (%)</div>
+                <canvas id="lightChart"></canvas>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="w-full text-center py-3 border-t border-gray-200 bg-white text-gray-600 text-sm">
+        © 2025 Hệ Thống IoT | <a href="mailto:support@iot.com" class="underline text-green-900">support@iot.com</a>
+    </footer>
+
+    <!-- Add popup HTML -->
+    <div id="popupNotification" style="display:none;position:fixed;z-index:9999;left:50%;top:30px;transform:translateX(-50%);background:#fff;border:2px solid #10b981;padding:18px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.12);font-size:1.1rem;font-weight:500;color:#17664d;min-width:220px;text-align:center;transition:opacity 0.2s;cursor:pointer;">
+        <span id="popupMessage"></span>
+    </div>
+
+    <script>
+        let lastChartUpdate = 0;
+        const chartUpdateInterval = 500; // 1 giây
+
+        // Tab mode switching
+        function switchTab(mode) {
+            const manualBtn = document.getElementById('modeManual');
+            const autoBtn = document.getElementById('modeAuto');
+            if(mode === 'manual') {
+                manualBtn.classList.add('active'); manualBtn.classList.remove('inactive');
+                autoBtn.classList.remove('active'); autoBtn.classList.add('inactive');
+                document.getElementById('manualSection').style.display = '';
+                document.getElementById('autoSection').style.display = 'none';
+            } else {
+                autoBtn.classList.add('active'); autoBtn.classList.remove('inactive');
+                manualBtn.classList.remove('active'); manualBtn.classList.add('inactive');
+                document.getElementById('manualSection').style.display = 'none';
+                document.getElementById('autoSection').style.display = '';
+            }
+        }
+        // Default: Auto
+        document.addEventListener('DOMContentLoaded', () => {
+            switchTab('auto');
+        });
+        // Slider value update
+        let isUserSliding = false;
+        let setupValuesReceived = false;
+
+        // Soil moisture slider
+        const soilSlider = document.getElementById('soilMoistureSlider');
+        soilSlider.addEventListener('input', function() {
+            isUserSliding = true;
+            document.getElementById('soilMoistureValue').textContent = this.value;
+        });
+        soilSlider.addEventListener('change', function() {
+            isUserSliding = false;
+        });
+        // Light slider
+        const lightSlider = document.getElementById('lightSlider');
+        lightSlider.addEventListener('input', function() {
+            isUserSliding = true;
+            document.getElementById('lightValue').textContent = this.value;
+        });
+        lightSlider.addEventListener('change', function() {
+            isUserSliding = false;
+        });
+
+        // Chart.js demo (replace/update with real data)
+        const tempChart = new Chart(document.getElementById('tempChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ["", "", "", "", ""],
+                datasets: [{ label: "Nhiệt Độ", data: [0,0,0,0,0], borderColor: "#10b981", fill: false, tension: 0.3 }]
+            },
+            options: { scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+        });
+        const humidityChart = new Chart(document.getElementById('humidityChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ["", "", "", "", ""],
+                datasets: [{ label: "Độ Ẩm", data: [0,0,0,0,0], borderColor: "#2563eb", fill: false, tension: 0.3 }]
+            },
+            options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
+        });
+        const soil1Chart = new Chart(document.getElementById('soil1Chart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ["", "", "", "", ""],
+                datasets: [{ label: "Độ Ẩm Đất 1", data: [0,0,0,0,0], borderColor: "#db2777", fill: false, tension: 0.3 }]
+            },
+            options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
+        });
+        const soil2Chart = new Chart(document.getElementById('soil2Chart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ["", "", "", "", ""],
+                datasets: [{ label: "Độ Ẩm Đất 2", data: [0,0,0,0,0], borderColor: "#7c3aed", fill: false, tension: 0.3 }]
+            },
+            options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
+        });
+        const lightChart = new Chart(document.getElementById('lightChart').getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: ["", "", "", "", ""],
+                datasets: [{ label: "Cường Độ Ánh Sáng", data: [0,0,0,0,0], borderColor: "#f59e42", fill: false, tension: 0.3 }]
+            },
+            options: { scales: { y: { beginAtZero: true, max: 100 } }, plugins: { legend: { display: false } } }
+        });
+
+        const client = mqtt.connect('wss://a7e103b17493474fb922fbc4a7a81412.s1.eu.hivemq.cloud:8884/mqtt', {
+            clientId: 'web_' + Math.random().toString(16).substr(2, 8),
+            username: 'Tuoi_cay',
+            password: 'Tuoi_cay1',
+            clean: true
+        });
+
+        client.on('connect', () => {
+            console.log('Đã kết nối MQTT');
+            client.subscribe('iot/data');
+            client.subscribe('iot/control/#');
+            document.getElementById('btnPump').disabled = false;
+            document.getElementById('btnLight').disabled = false;
+            document.getElementById('btnValve1').disabled = false;
+            document.getElementById('btnValve2').disabled = false;
+        });
+        client.on('error', err => {
+            alert('Lỗi kết nối MQTT: ' + err.message);
+        });
+
+        function updateButtonState(btnId, state) {
+            const btn = document.getElementById(btnId);
+            if (!btn) return;
+            if (state === 'BẬT') {
+                btn.classList.remove('bg-gray-200', 'bg-gray-300', 'text-gray-700');
+                btn.classList.add('bg-teal-500', 'text-white');
+                btn.textContent = btn.textContent.replace('Bật', 'Tắt');
+            } else {
+                btn.classList.remove('bg-teal-500', 'bg-green-500', 'text-white');
+                btn.classList.add('bg-gray-300', 'text-white');
+                btn.textContent = btn.textContent.replace('Tắt', 'Bật');
+            }
+        }
+
+        // Điều khiển thiết bị
+        document.getElementById('btnPump').onclick = function() {
+            const newState = document.getElementById('pumpStatus').textContent === 'BẬT' ? 'OFF' : 'ON';
+            client.publish('iot/control/pump', newState);
+        };
+        document.getElementById('btnLight').onclick = function() {
+            const newState = document.getElementById('lightStatus').textContent === 'BẬT' ? 'OFF' : 'ON';
+            client.publish('iot/control/light', newState);
+        };
+        document.getElementById('btnValve1').onclick = function() {
+            const newState = document.getElementById('valve1Status').textContent === 'BẬT' ? 'OFF' : 'ON';
+            client.publish('iot/control/valve1', newState);
+        };
+        document.getElementById('btnValve2').onclick = function() {
+            const newState = document.getElementById('valve2Status').textContent === 'BẬT' ? 'OFF' : 'ON';
+            client.publish('iot/control/valve2', newState);
+        };
+
+        function updateChart(chart, newValue) {
+            if (!chart || !chart.data || !chart.data.datasets || !chart.data.datasets[0]) return;
+            if (typeof newValue !== 'number' || isNaN(newValue)) return;
+
+            const maxPoints = 10; // 🟢 Giới hạn còn lại 10 điểm
+
+            chart.data.datasets[0].data.push(newValue);
+            chart.data.labels.push(new Date().toLocaleTimeString());
+
+            if (chart.data.datasets[0].data.length > maxPoints) {
+                chart.data.datasets[0].data.shift();
+                chart.data.labels.shift();
+            }
+
+            chart.update('none'); // Không cần hiệu ứng động
+        }
+
+            
+
+        // Nhận dữ liệu và cập nhật UI
+        client.on('message', (topic, message) => {
+            if (topic === 'iot/data') {
+                const data = JSON.parse(message.toString());
+
+                const now = Date.now();
+                if (now - lastChartUpdate >= chartUpdateInterval) {
+                    updateChart(tempChart, parseFloat(data.temperature));
+                    updateChart(humidityChart, parseFloat(data.humidity));
+                    updateChart(soil1Chart, parseFloat(data.soil1));
+                    updateChart(soil2Chart, parseFloat(data.soil2));
+                    updateChart(lightChart, parseFloat(data.light));
+                    lastChartUpdate = now;
+                }
+
+                console.log('Received MQTT data:', data);
+                
+                // Update device status
+                document.getElementById('pumpStatus').textContent = data.pump_state === 'ON' ? 'BẬT' : 'TẮT';
+                document.getElementById('lightStatus').textContent = data.light_state === 'ON' ? 'BẬT' : 'TẮT';
+                document.getElementById('valve1Status').textContent = data.valve1_state === 'ON' ? 'BẬT' : 'TẮT';
+                document.getElementById('valve2Status').textContent = data.valve2_state === 'ON' ? 'BẬT' : 'TẮT';
+                document.getElementById('waterStatus').textContent = data.water_level === 'available' ? 'Nước Còn' : 'Nước Hết';
+                
+                // Update sensor data
+                document.getElementById('quickTemp').textContent = (data.temperature !== undefined ? data.temperature : '--') + ' °C';
+                document.getElementById('quickHumidity').textContent = (data.humidity !== undefined ? data.humidity : '--') + ' %';
+                document.getElementById('quickSoil1').textContent = (data.soil1 !== undefined ? data.soil1 : '--') + ' %';
+                document.getElementById('quickSoil2').textContent = (data.soil2 !== undefined ? data.soil2 : '--') + ' %';
+                document.getElementById('quickLight').textContent = (data.light !== undefined ? data.light : '--') + ' %';
+                
+                // Only update slider values if setup values are present and not currently sliding
+                if (data.setup_soil !== undefined && !isUserSliding && !setupValuesReceived) {
+                    console.log('Updating soil slider to:', data.setup_soil);
+                    soilSlider.value = data.setup_soil;
+                    document.getElementById('soilMoistureValue').textContent = data.setup_soil;
+                }
+                if (data.setup_light !== undefined && !isUserSliding && !setupValuesReceived) {
+                    console.log('Updating light slider to:', data.setup_light);
+                    lightSlider.value = data.setup_light;
+                    document.getElementById('lightValue').textContent = data.setup_light;
+                }
+                
+                // Mark that we've received setup values
+                if (data.setup_soil !== undefined || data.setup_light !== undefined) {
+                    setupValuesReceived = true;
+                }
+                
+                // Update button states
+                updateButtonState('btnPump', document.getElementById('pumpStatus').textContent);
+                updateButtonState('btnLight', document.getElementById('lightStatus').textContent);
+                updateButtonState('btnValve1', document.getElementById('valve1Status').textContent);
+                updateButtonState('btnValve2', document.getElementById('valve2Status').textContent);
+                
+                // Water warning popup
+                if (data.water_level === 'low' && data.pump_state === 'ON') {
+                    showPopup('CẢNH BÁO: Hết nước nhưng máy bơm đang chạy!', 3500);
+                }
+            }
+        });
+
+        // Gửi ngưỡng setup khi nhấn Lưu Ngưỡng
+        document.getElementById('btnSaveThreshold').onclick = function() {
+            const thresholds = {
+                setup_soil: parseInt(soilSlider.value),
+                setup_light: parseInt(lightSlider.value)
+            };
+            console.log('Sending thresholds:', thresholds);
+            client.publish('iot/data', JSON.stringify(thresholds));
+            showPopup('Lưu ngưỡng thành công!', 1800);
+            isUserSliding = false;
+        };
+
+        document.getElementById('modeManual').onclick = function() {
+            client.publish('iot/control/mode', 'MANUAL');
+            switchTab('manual');
+        };
+        document.getElementById('modeAuto').onclick = function() {
+            client.publish('iot/control/mode', 'AUTO');
+            switchTab('auto');
+        };
+
+        // Add popup functionality
+        const popupHtml = `
+        <div id="popupNotification" style="display:none;position:fixed;z-index:9999;left:50%;top:30px;transform:translateX(-50%);background:#fff;border:2px solid #10b981;padding:18px 32px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,0.12);font-size:1.1rem;font-weight:500;color:#17664d;min-width:220px;text-align:center;transition:opacity 0.2s;cursor:pointer;">
+            <span id="popupMessage"></span>
+        </div>`;
+        document.body.insertAdjacentHTML('beforeend', popupHtml);
+        let popupTimeout = null;
+        function showPopup(msg, duration=2000) {
+            const popup = document.getElementById('popupNotification');
+            document.getElementById('popupMessage').textContent = msg;
+            popup.style.display = 'block';
+            popup.style.opacity = 1;
+            if (popupTimeout) clearTimeout(popupTimeout);
+            popupTimeout = setTimeout(() => {
+                popup.style.opacity = 0;
+                setTimeout(() => { popup.style.display = 'none'; }, 300);
+            }, duration);
+        }
+        document.getElementById('popupNotification').onclick = function() {
+            this.style.opacity = 0;
+            setTimeout(() => { this.style.display = 'none'; }, 300);
+            if (popupTimeout) clearTimeout(popupTimeout);
+        };
+    </script>
+</body>
+</html>
